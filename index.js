@@ -3,7 +3,11 @@ const azure = require('azure-storage');
 const bodyParser = require('body-parser');
 var multiparty = require('multiparty');
 
-
+/**
+ * Se deben especificar las variables :
+ * AZURE_STORAGE_CONNECTION_STRING: el connection string del SAS
+ * BLOB_CONTAINER : El nombre del blob container
+ */
 const app = express()
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.json({limit: '50mb'}));
