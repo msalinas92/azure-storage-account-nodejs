@@ -1,7 +1,10 @@
 const express = require('express')
 const azure = require('azure-storage');
+var formidable = require('formidable');
 const bodyParser = require('body-parser');
-var multiparty = require('multiparty');
+var path = require('path');
+var mime = require('mime');
+var fs = require('fs');
 
 /**
  * Se deben especificar las variables :
@@ -10,8 +13,8 @@ var multiparty = require('multiparty');
  */
 const app = express()
 app.use(bodyParser.urlencoded({ extended: true }));
-app.use(express.json({limit: '50mb'}));
-app.use(express.urlencoded({limit: '50mb'}));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb' }));
 
 var blobService = azure.createBlobService();
 const port = 3000
@@ -34,17 +37,57 @@ if (blob_container == undefined) {
 }
 
 /**
+ * Obtiene el archivo recibiendo el nombre como parametro y dejando el archivo como archivo temporal
+ * El archivo es eliminado del ambiente local al finalizar.
+ */
+app.get('/read/:file', (req, res, next) => {
+    var fileName = req.params.file;
+    blobService.getBlobProperties(blob_container, fileName, (err, properties, status) => {
+
+        blobService.getBlobToLocalFile(blob_container, fileName, './file/' + fileName, error => {
+            if (error) {
+                res.send(502, "Error al obtener el archivo: %s", error);
+            } else {
+
+                var file = './file/' + fileName;
+                var filename = path.basename(file);
+                var mimetype = mime.getType(file);
+                res.setHeader('Content-disposition', 'inline; filename=' + filename);
+                res.setHeader('Content-type', mimetype);
+                var filestream = fs.createReadStream(file);
+                filestream.pipe(res);
+                console.log(' Blob ' + fileName + ' download finished.');
+            }
+        });
+
+
+    });
+
+    res.on('finish', () => {
+        try {
+            fs.unlinkSync('./file/' + fileName)
+        } catch (err) {
+            console.error(err)
+        }
+    });
+});
+
+
+
+/**
  * Obtiene el archivo recibiendo el nombre como parametro y dejando el 
  */
 app.get('/file/:file', (req, res, next) => {
     var fileName = req.params.file;
     blobService.getBlobProperties(blob_container, fileName, (err, properties, status) => {
+        console.log(properties);
         if (err) {
             res.send(502, "Error al obtener el archivo: %s", err.message);
         } else if (!status.isSuccessful) {
             res.send(404, "El archivo %s no existe", fileName);
         } else {
             res.header('Content-Type', properties.contentType);
+            res.header('content-disposition', 'attachment; filename=' + properties.name);
             blobService.createReadStream(blob_container, fileName).pipe(res);
         }
     });
@@ -55,25 +98,25 @@ app.get('/file/:file', (req, res, next) => {
  */
 app.post('/file', (req, res, next) => {
     var blobService = azure.createBlobService();
-    var form = new multiparty.Form();
-    form.on('part', function (part) {
-        if (part.filename) {
 
-            var size = part.byteCount - part.byteOffset;
-            var name = part.filename;
+    var form = new formidable.IncomingForm();
 
-            blobService.createBlockBlobFromStream(blob_container, name, part, size, (error, response) => {
-                if (error) {
-                    res.status(500).send(error);
-                } else {
-                    res.status(201).send(response);
-                }
-            });
-        } else {
-            form.handlePart(part);
-        }
+    form.parse(req, (err, fields, files) => {
+
+        var options = {
+            contentType: files.file.type,
+            metadata: { fileName: files.file.name }
+        };
+
+        blobService.createBlockBlobFromLocalFile(blob_container, files.file.name, files.file.path, options, (error) => {
+            if (error == null) {
+                res.status(201).send({ message: "Archivo subido exitosamente" });
+            } else {
+                res.status(500).send(error);
+            }
+        });
     });
-    form.parse(req);
+
 });
 
 
